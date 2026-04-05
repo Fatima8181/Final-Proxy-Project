@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Proxy Flow</title>
+<style>
+  :root{
+    --bg:#ffffff; --panel:#f9fafb; --text:#111827;
+    --ok:#16a34a; --ok2:#22c55e;
+    --err:#dc2626; --focus:#22c55e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial}
+  .wrap{max-width:1200px;margin:24px auto;padding:16px}
+
+  .brand{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:10px 14px;margin-bottom:14px}
+  .brand img{height:44px;width:auto;object-fit:contain}
+  .brand h1{margin:0;font-size:22px;font-weight:800}
+  .brand small{display:block;color:#475569;margin-top:2px}
+
+  .status{background:#f3f4f6;border:1px solid #d1d5db;border-radius:12px;padding:10px 12px;margin:8px 0 12px;font-weight:700}
+
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+  .btn{
+    padding:9px 14px;border-radius:10px;cursor:pointer;font-weight:700;
+    border:1px solid transparent;transition:.15s filter,.15s border-color
+  }
+  .btn.start{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .btn.stop{background:var(--err);color:#fff;border-color:var(--err)}
+  .btn.restart{background:#fff;color:var(--ok);border-color:var(--ok)}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .btn:hover{filter:brightness(.96)}
+
+  .grid{display:grid;grid-template-columns:320px 1fr 320px;gap:16px;align-items:start}
+  .card{position:relative;background:var(--panel);border:1px solid #d1d5db;border-radius:16px;padding:14px;box-shadow:0 4px 10px rgba(0,0,0,.08)}
+  .title{font-weight:800;margin-bottom:8px}
+
+  .pbar{height:10px;background:#e5e7eb;border:1px solid #cbd5e1;border-radius:999px;overflow:hidden}
+  .pbar>span{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--ok2),var(--ok));transition:width .35s ease}
+
+  .list{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding:8px 6px 8px 12px;position:relative}
+
+  .req{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid #d1d5db;border-radius:12px;background:#f3f4f6;transition:.2s}
+  .req.current{border-color:var(--ok2);box-shadow:0 0 0 3px rgba(34,197,94,.20) inset}
+  .req.done{opacity:.6}
+  .req.denied{
+    border-color:#dc2626;
+    background:#fee2e2;
+    box-shadow:0 0 0 3px rgba(220,38,38,.15) inset;
+  }
+
+  .monos{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+  .chip{margin-left:auto;font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid #cbd5e1;background:#f9fafb}
+  .chip.high{border-color:#b91c1c;color:#b91c1c}
+  .chip.done{border-color:var(--ok);background:#ecfdf5;color:#166534}
+  .chip.denied{border-color:#dc2626;background:#fee2e2;color:#991b1b}
+
+  .cursor{position:absolute;left:6px;width:6px;height:28px;background:linear-gradient(180deg,var(--ok2),var(--ok));border-radius:999px;transform:translateY(0);transition:transform .35s ease}
+
+  .slimCursor{position:absolute; left:6px; width:4px; height:24px; background:var(--ok2);
+    border-radius:999px; box-shadow:0 0 8px rgba(34,197,94,.5); display:none;}
+
+  .box{padding:16px;border-radius:14px;background:#f9fafb;border:2px solid #e5e7eb;transition:.2s}
+  .box.active{border-color:var(--focus);box-shadow:0 0 0 3px rgba(34,197,94,.20) inset,0 0 16px rgba(34,197,94,.10)}
+
+  .aclItem,.apprItem{border:1px solid #d1d5db;background:#f3f4f6;padding:8px 10px;border-radius:10px}
+  .aclItem.scanning,.apprItem.scanning{box-shadow:0 0 0 3px rgba(34,197,94,.25),0 0 18px rgba(34,197,94,.12);border-color:var(--ok2)}
+  .aclItem.miss,.apprItem.miss{opacity:.55}
+  .aclItem.hit,.apprItem.hit{box-shadow:0 0 0 3px rgba(34,197,94,.25),0 0 18px rgba(34,197,94,.12);border-color:var(--ok);background:#ecfdf5}
+
+  .systems{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .sys{border:2px dashed #cbd5e1;padding:12px;border-radius:12px;text-align:center;background:#f3f4f6;font-weight:800}
+  .sys.active{border-style:solid;border-color:var(--ok2);box-shadow:0 0 0 3px rgba(34,197,94,.20) inset}
+  .sys.ok{border-style:solid;border-color:var(--ok);box-shadow:0 0 0 3px rgba(34,197,94,.20) inset}
+
+  .log{font-family:ui-monospace,Consolas,monospace;background:#f3f4f6;border:1px solid #d1d5db;padding:10px;border-radius:12px;height:170px;overflow:auto;font-size:13px;color:#111}
+
+  @media (max-width:960px){.grid{grid-template-columns:1fr;gap:12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <img src="Logo.png" alt="Logo"/>
+    <div>
+      <h1>Proxy Flow Simulation</h1>
+      <small>Requests → Proxy → ACL → Approvers → Systems → Logs</small>
+    </div>
+  </div>
+
+  <div class="status" id="status">Auto-loaded. Please Press Start .</div>
+
+  <div class="controls">
+    <button id="startBtn"   class="btn start">Start</button>
+    <button id="stopBtn"    class="btn stop" disabled>Stop</button>
+    <button id="restartBtn" class="btn restart">Restart</button>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="leftRequests">
+      <div class="title">Requests</div>
+      <div id="reqList" class="list"></div>
+      <div class="cursor" id="queueCursor" style="display:none"></div>
+      <div class="pbar" style="margin-top:10px"><span id="queueBar"></span></div>
+    </div>
+
+    <div class="card">
+      <div class="title">Proxy</div>
+      <div class="pbar" style="margin:8px 0 12px"><span id="proxyBar"></span></div>
+
+      <div class="box" id="aclBox">
+        <h3>ACL</h3>
+        <div class="list monos" id="aclList" style="max-height:220px;"></div>
+        <div class="slimCursor" id="aclCursor"></div>
+        <div class="pbar" style="height:8px;margin-top:8px"><span id="aclScanBar"></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="box" id="approversBox">
+        <h3>Approvers</h3>
+        <div class="list monos" id="apprList" style="max-height:180px;"></div>
+        <div class="slimCursor" id="apprCursor"></div>
+        <div class="pbar" style="height:8px;margin-top:8px"><span id="apprScanBar"></span></div>
+        <div class="pbar" style="margin-top:10px"><span id="approverBar"></span></div>
+      </div>
+
+      <div class="box" id="systemsBox" style="margin-top:12px">
+        <h3>Systems</h3>
+        <div class="systems">
+          <div class="sys" id="sysHR">HR</div>
+          <div class="sys" id="sysBANNER">Banner</div>
+          <div class="sys" id="sysTS">TS</div>
+        </div>
+      </div>
+
+      <div class="box" id="logsBox" style="margin-top:12px">
+        <h3>Logs</h3>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=(s)=>document.querySelector(s);
+const reqListEl=$('#reqList'), queueBar=$('#queueBar'), queueCursor=$('#queueCursor');
+const proxyBar=$('#proxyBar'), approverBar=$('#approverBar');
+const logEl=$('#log'), statusEl=$('#status');
+const leftRequests=$('#leftRequests'), aclBox=$('#aclBox'), approversBox=$('#approversBox'), systemsBox=$('#systemsBox'), logsBox=$('#logsBox');
+const sysEls={HR:$('#sysHR'), BANNER:$('#sysBANNER'), TS:$('#sysTS')};
+const startBtn=$('#startBtn'), stopBtn=$('#stopBtn'), restartBtn=$('#restartBtn');
+const aclListEl=$('#aclList'), aclScanBar=$('#aclScanBar'), aclCursor=$('#aclCursor');
+const apprListEl=$('#apprList'), apprScanBar=$('#apprScanBar'), apprCursor=$('#apprCursor');
+
+aclListEl.style.position='relative';
+apprListEl.style.position='relative';
+aclListEl.appendChild(aclCursor);
+apprListEl.appendChild(apprCursor);
+
+const aclWhitelist = [
+  {user:'Ali',    action:'read',    system:'HR',     high:false},
+  {user:'Ali',    action:'read',    system:'BANNER', high:false},
+  {user:'Fatima', action:'read',    system:'BANNER', high:false},
+  {user:'Aseel',  action:'read',    system:'BANNER', high:false},
+
+  {user:'Ali',    action:'write',   system:'HR',     high:false},
+  {user:'Fatima', action:'write',   system:'BANNER', high:false},
+  {user:'Aseel',  action:'write',   system:'TS',     high:true },
+
+  {user:'Ali',    action:'restart', system:'HR',     high:false},
+  {user:'Fatima', action:'restart', system:'HR',     high:false},
+  {user:'Aseel',  action:'restart', system:'HR',     high:false},
+
+  {user:'Aseel',  action:'read',    system:'TS',     high:false},
+  {user:'Omar',   action:'read',    system:'HR',     high:false},
+  {user:'Omar',   action:'restart', system:'HR',     high:true },
+
+  {user:'Reem',   action:'write',   system:'BANNER', high:true },
+  {user:'Reem',   action:'read',    system:'BANNER', high:false }
+];
+
+const approversList=[
+  {admin:'Kamal', action:'write',   system:'HR'},
+  {admin:'Kamal', action:'restart', system:'HR'},
+  {admin:'Nour',  action:'write',   system:'BANNER'},
+  {admin:'Nour',  action:'restart', system:'BANNER'},
+  {admin:'Nour',  action:'write',   system:'TS'},
+];
+
+let queue=[], totalCount=0, processed=0;
+let currentFlow=[], flowStep=0;
+let playingTimer=null, isRunning=false;
+let stepRunning=false;
+let currentRequestDenied=false;
+
+function progress(el,p){ if(el) el.style.width=p+'%'; }
+function log(m){ logEl.innerHTML+=`• ${m}<br>`; logEl.scrollTop=logEl.scrollHeight; }
+function setActiveBox(el){ [leftRequests,aclBox,approversBox,systemsBox,logsBox].forEach(b=>b.classList.remove('active')); el&&el.classList.add('active'); }
+
+function moveQueueCursor(idx){
+  const row=reqListEl.children[idx];
+  if(!row){ queueCursor.style.display='none'; return; }
+  queueCursor.style.display='block';
+  const listTop=reqListEl.getBoundingClientRect().top;
+  const rowTop=row.getBoundingClientRect().top;
+  const delta=rowTop - listTop + reqListEl.scrollTop + 6;
+  queueCursor.style.transform=`translateY(${delta}px)`;
+  row.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+
+function moveSlimCursor(listEl,cursorEl,rowEl){
+  if(!rowEl){ cursorEl.style.display='none'; return; }
+  cursorEl.style.display='block';
+  const listRect=listEl.getBoundingClientRect();
+  const rowRect=rowEl.getBoundingClientRect();
+  const delta=(rowRect.top - listRect.top) + listEl.scrollTop + 4;
+  cursorEl.style.top = delta + 'px';
+  rowEl.scrollIntoView({block:'nearest', behavior:'smooth'});
+}
+
+function renderQueue(){
+  reqListEl.innerHTML='';
+  queue.forEach((r,i)=>{
+    const row=document.createElement('div');
+    row.className='req';
+    if(i===0) row.classList.add('current');
+
+    row.innerHTML=`<div class="monos">&lt; ${r.user}, ${r.action}${r.high?' (high)':''}, ${r.system} &gt;</div>
+                   <div class="chip ${r.high?'high':''}">${i===0?'processing':'pending'}</div>`;
+    reqListEl.appendChild(row);
+  });
+  moveQueueCursor(0);
+  progress(queueBar, totalCount ? (processed/totalCount*100) : 0);
+}
+
+function markCurrentDone(status="done"){
+  const first=reqListEl.querySelector('.req');
+  if(!first) return;
+
+  first.classList.remove('current');
+  const chip=first.querySelector('.chip');
+
+  if(status==="denied"){
+    first.classList.add('denied');
+    if(chip){
+      chip.textContent='HIGH DENIED ✗';
+      chip.classList.add('denied');
+      chip.classList.remove('done');
+      chip.classList.remove('high');
+    }
+  }else{
+    first.classList.add('done');
+    if(chip){
+      chip.textContent='done ✓';
+      chip.classList.add('done');
+    }
+  }
+}
+
+function renderACLList(){
+  aclListEl.innerHTML='';
+  aclWhitelist.forEach(e=>{
+    const d=document.createElement('div');
+    d.className='aclItem';
+    const tag = e.high ? ' (high)' : '';
+    d.textContent=`< ${e.user}, ${e.action}${tag}, ${e.system} >`;
+    aclListEl.appendChild(d);
+  });
+}
+
+function renderApprList(){
+  apprListEl.innerHTML='';
+  approversList.forEach(e=>{
+    const d=document.createElement('div');
+    d.className='apprItem';
+    d.textContent=`< ${e.admin}, ${e.action}, ${e.system} >`;
+    apprListEl.appendChild(d);
+  });
+}
+
+const isSame=(a,b)=>a.toLowerCase()===b.toLowerCase();
+const lookupACL=(r)=>aclWhitelist.find(e=>isSame(e.user,r.user)&&isSame(e.action,r.action)&&isSame(e.system,r.system));
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+
+async function scanACLAnimation(r){
+  const items=[...aclListEl.querySelectorAll('.aclItem')];
+  items.forEach(x=>x.classList.remove('scanning','miss','hit'));
+  progress(aclScanBar,0);
+
+  let hit=false;
+  for(let i=0;i<aclWhitelist.length;i++){
+    const e=aclWhitelist[i], el=items[i];
+    moveSlimCursor(aclListEl, aclCursor, el);
+    progress(aclScanBar, Math.round((i/Math.max(aclWhitelist.length-1,1))*100));
+    el.classList.add('scanning');
+    await sleep(200);
+    el.classList.remove('scanning');
+
+    if(isSame(e.user,r.user)&&isSame(e.action,r.action)&&isSame(e.system,r.system)){
+      el.classList.add('hit');
+      hit=true;
+      progress(aclScanBar,100);
+      break;
+    } else {
+      el.classList.add('miss');
+    }
+  }
+  if(!hit) progress(aclScanBar,100);
+  return hit;
+}
+
+async function scanApproverAnimation(r){
+  const items=[...apprListEl.querySelectorAll('.apprItem')];
+  items.forEach(x=>x.classList.remove('scanning','miss','hit'));
+  progress(apprScanBar,0);
+
+  for(let i=0;i<approversList.length;i++){
+    const e=approversList[i], el=items[i];
+    moveSlimCursor(apprListEl, apprCursor, el);
+    progress(apprScanBar, Math.round((i/Math.max(approversList.length-1,1))*100));
+    el.classList.add('scanning');
+    await sleep(200);
+    el.classList.remove('scanning');
+
+    if(isSame(e.action,r.action)&&isSame(e.system,r.system)){
+      el.classList.add('hit');
+      progress(apprScanBar,100);
+      break;
+    } else {
+      el.classList.add('miss');
+    }
+  }
+}
+
+const needsApprover=(r)=> {
+  const entry = lookupACL(r);
+  return !!(entry && entry.high === true);
+};
+
+function buildFlow(r){
+  const steps=[];
+
+  steps.push(async()=>{
+    setActiveBox(leftRequests);
+    statusEl.textContent='Request → Proxy';
+    progress(proxyBar,15);
+  });
+
+  steps.push(async()=>{
+    setActiveBox(aclBox);
+    statusEl.textContent='ACL: scanning…';
+    progress(proxyBar,35);
+
+    const ok=await scanACLAnimation(r);
+    const entry = lookupACL(r);
+
+    if(!ok || !entry){
+      currentRequestDenied = true;
+      statusEl.textContent = 'ACL: not in list → denied ❌';
+      log(`❌ DENIED: Unauthorized HIGH request <${r.user}, ${r.action}, ${r.system}>`);
+      progress(proxyBar,45);
+      return;
+    }
+
+    statusEl.textContent = entry.high
+      ? 'ACL: in list (high) → escalate'
+      : 'ACL: in list → bypass approvers';
+  });
+
+  steps.push(async()=>{
+    if(currentRequestDenied){
+      setActiveBox(logsBox);
+      statusEl.textContent='Request Denied ❌';
+      return;
+    }
+
+    if(needsApprover(r)){
+      setActiveBox(approversBox);
+      statusEl.textContent='Approvers: scanning…';
+      progress(approverBar,50);
+      await scanApproverAnimation(r);
+      log('Auto-approved ✅ (simulated)');
+      progress(approverBar,85);
+    }
+  });
+
+  steps.push(async()=>{
+    if(currentRequestDenied){
+      setActiveBox(logsBox);
+      statusEl.textContent='Denied request logged';
+      progress(proxyBar,100);
+      return;
+    }
+
+    setActiveBox(systemsBox);
+    statusEl.textContent=`Execute on ${r.system}`;
+    const key=r.system.toUpperCase();
+    const el=sysEls[key]||sysEls[r.system];
+    el?.classList.add('active');
+    setTimeout(()=>{
+      el?.classList.remove('active');
+      el?.classList.add('ok');
+    },300);
+    progress(proxyBar,85);
+  });
+
+  steps.push(async()=>{
+    setActiveBox(logsBox);
+
+    if(currentRequestDenied){
+      statusEl.textContent='Write deny log & complete';
+      progress(proxyBar,100);
+      return;
+    }
+
+    statusEl.textContent='Write log & complete';
+    log(`Completed <${r.user}, ${r.action}, ${r.system}>`);
+    progress(proxyBar,100);
+  });
+
+  return steps;
+}
+
+async function nextStep(){
+  if (stepRunning) return;
+  stepRunning = true;
+
+  try{
+    if(currentFlow.length===0){
+      if(queue.length===0) loadSamples();
+
+      currentRequestDenied = false;
+
+      progress(proxyBar,0);
+      progress(approverBar,0);
+      progress(aclScanBar,0);
+      progress(apprScanBar,0);
+      aclCursor.style.display='none';
+      apprCursor.style.display='none';
+
+      renderACLList();
+      renderApprList();
+      renderQueue();
+
+      const r=queue[0];
+      log(`Received: <${r.user}, ${r.action}${r.high?' (high)':''}, ${r.system}>`);
+      currentFlow=buildFlow(r);
+      flowStep=0;
+    }
+
+    if(flowStep<currentFlow.length){
+      await currentFlow[flowStep++]();
+    }else{
+      markCurrentDone(currentRequestDenied ? "denied" : "done");
+      processed = Math.min(processed+1, totalCount);
+      progress(queueBar, totalCount ? (processed/totalCount*100) : 0);
+
+      queue.shift();
+      currentFlow=[];
+      flowStep=0;
+      aclCursor.style.display='none';
+      apprCursor.style.display='none';
+
+      if(queue.length){
+        renderQueue();
+      } else {
+        renderQueue();
+        statusEl.textContent='All done.';
+        stopAuto();
+      }
+    }
+  } finally {
+    stepRunning=false;
+  }
+}
+
+function loadSamples(){
+  queue = [
+    {user:'Fatima',  action:'read',    system:'BANNER',  high:false},
+    {user:'Aseel',   action:'write',   system:'TS',      high:true},
+    {user:'Aseel',   action:'read',    system:'TS',      high:false},
+    {user:'Omar',    action:'read',    system:'HR',      high:false},
+    {user:'Reem',    action:'write',   system:'BANNER',  high:true},
+    {user:'Omar',    action:'restart', system:'HR',      high:true},
+    {user:'Reem',    action:'read',    system:'BANNER',  high:false},
+    {user:'Hacker',  action:'delete',  system:'HR',      high:true}
+  ];
+  totalCount = queue.length;
+  processed = 0;
+  renderQueue();
+}
+
+function startAuto(){
+  if(isRunning) return;
+  isRunning=true;
+  startBtn.disabled=true;
+  stopBtn.disabled=false;
+  playingTimer=setInterval(nextStep,2000);
+  statusEl.textContent='Running…';
+}
+
+function stopAuto(){
+  clearInterval(playingTimer);
+  isRunning=false;
+  startBtn.disabled=false;
+  stopBtn.disabled=true;
+  statusEl.textContent='Stopped. Press Start to continue.';
+}
+
+function restartAll(){
+  if(isRunning) stopAuto();
+  queue=[];
+  totalCount=0;
+  processed=0;
+  currentFlow=[];
+  flowStep=0;
+  currentRequestDenied=false;
+
+  reqListEl.innerHTML='';
+  logEl.innerHTML='';
+
+  progress(queueBar,0);
+  progress(proxyBar,0);
+  progress(approverBar,0);
+  progress(aclScanBar,0);
+  progress(apprScanBar,0);
+
+  queueCursor.style.display='none';
+  aclCursor.style.display='none';
+  apprCursor.style.display='none';
+
+  Object.values(sysEls).forEach(e=>e.classList.remove('ok','active'));
+
+  renderACLList();
+  renderApprList();
+  loadSamples();
+  statusEl.textContent='Reset. Press Start.';
+}
+
+startBtn.onclick=startAuto;
+stopBtn.onclick=stopAuto;
+restartBtn.onclick=restartAll;
+
+renderACLList();
+renderApprList();
+loadSamples();
+</script>
+</body>
+</html>
